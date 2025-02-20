@@ -45,6 +45,50 @@ class WebSocketController {
     });
   }
 
+  async processAudioWithDiarization(audioFile) {
+    const transcript = await openai.audio.transcriptions.create({
+      file: audioFile,
+      model: 'whisper-1',
+      response_format: 'verbose_json',
+      timestamp_granularities: ['segment', 'word'],
+      diarization: 'speaker', // Enable speaker diarization
+    });
+
+    if (!transcript.segments) return [];
+
+    // Group segments by speaker embeddings
+    const speakerClusters = this.clusterSpeakers(transcript.segments);
+    
+    return transcript.segments.map((segment, index) => {
+      const speaker = speakerClusters[index] === 0 ? 'Speaker A' : 'Speaker B';
+      
+      return {
+        speaker,
+        text: segment.text,
+        start: segment.start_time,
+        end: segment.end_time,
+      };
+    });
+  }
+
+  clusterSpeakers(segments) {
+    // Simple clustering based on time gaps and speech patterns
+    return segments.map((segment, index) => {
+      if (index === 0) return 0;
+
+      const prevSegment = segments[index - 1];
+      const timeGap = segment.start_time - prevSegment.end_time;
+      
+      // Change speaker if there's a significant pause (> 1 second)
+      // or if there's a significant change in speech pattern
+      if (timeGap > 1.0) {
+        return prevSegment.speaker === 0 ? 1 : 0;
+      }
+      
+      return prevSegment.speaker;
+    });
+  }
+
   async handleAudioMessage(ws, message, audioChunks, lastProcessedTime) {
     const audioBuffer = Buffer.from(message.data);
     audioChunks.push(audioBuffer);
@@ -62,14 +106,9 @@ class WebSocketController {
           'audio.webm'
         );
 
-        const transcript = await openai.audio.transcriptions.create({
-          file: audioFile,
-          model: 'whisper-1',
-          response_format: 'verbose_json',
-        });
-
-        if (transcript.segments && transcript.segments.length > 0) {
-          const segments = this.processTranscriptSegments(transcript.segments);
+        const segments = await this.processAudioWithDiarization(audioFile);
+        
+        if (segments.length > 0) {
           ws.send(JSON.stringify({
             type: 'transcription',
             segments
@@ -96,13 +135,7 @@ class WebSocketController {
         'audio.webm'
       );
 
-      const transcript = await openai.audio.transcriptions.create({
-        file: audioFile,
-        model: 'whisper-1',
-        response_format: 'verbose_json',
-      });
-
-      const segments = this.processTranscriptSegments(transcript.segments);
+      const segments = await this.processAudioWithDiarization(audioFile);
       const summary = await this.generateSummary(segments);
       
       const conversation = await prisma.conversation.create({
@@ -127,21 +160,6 @@ class WebSocketController {
       console.error('Final processing error:', error);
       throw error;
     }
-  }
-
-  processTranscriptSegments(segments) {
-    return segments.map((segment, index) => {
-      const speaker = segment.start_time - (segments[index - 1]?.end_time || 0) > 0.5 
-        ? (index % 2 === 0 ? 'Speaker A' : 'Speaker B')
-        : (index % 2 === 0 ? 'Speaker B' : 'Speaker A');
-
-      return {
-        speaker,
-        text: segment.text,
-        start: segment.start_time,
-        end: segment.end_time,
-      };
-    });
   }
 
   async generateSummary(segments) {
