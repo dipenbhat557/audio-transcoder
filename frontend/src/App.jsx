@@ -4,27 +4,62 @@ import { BiLoader } from 'react-icons/bi';
 
 const App = () => {
   const [isRecording, setIsRecording] = useState(false);
-  const [transcript, setTranscript] = useState([]);
+  const [transcriptHistory, setTranscriptHistory] = useState([]);
+  const [finalTranscript, setFinalTranscript] = useState([]);
   const [summary, setSummary] = useState('');
   const [isConnected, setIsConnected] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
+  
   const mediaRecorder = useRef(null);
   const wsRef = useRef(null);
   const audioChunks = useRef([]);
   const timerRef = useRef(null);
+  const transcriptEndRef = useRef(null);
 
   useEffect(() => {
     connectWebSocket();
     return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-      }
+      if (wsRef.current) wsRef.current.close();
+      if (timerRef.current) clearInterval(timerRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (transcriptEndRef.current) {
+      transcriptEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [transcriptHistory, finalTranscript]);
+
+  const mergeTranscripts = (segments) => {
+    console.log('\n--- Merging Transcripts ---');
+    console.log('Input segments:', segments.length);
+    
+    const merged = segments.reduce((acc, curr) => {
+      const last = acc[acc.length - 1];
+      
+      if (last && last.speaker === curr.speaker && 
+          curr.start - last.end < 2.0) {
+        console.log('Merging segment with previous:', {
+          prev: last.text,
+          curr: curr.text
+        });
+        // Merge with previous segment
+        last.text = `${last.text} ${curr.text}`;
+        last.end = curr.end;
+        last.words = [...last.words, ...curr.words];
+        return acc;
+      }
+      
+      // Add as new segment
+      console.log('Adding new segment:', curr.text);
+      return [...acc, { ...curr }];
+    }, []);
+
+    console.log('Output segments:', merged.length);
+    console.log('--- Merge Complete ---\n');
+    return merged;
+  };
 
   const connectWebSocket = () => {
     const ws = new WebSocket(import.meta.env.VITE_WS_URL || 'ws://localhost:3000');
@@ -35,33 +70,45 @@ const App = () => {
     };
 
     ws.onmessage = (event) => {
+      console.log('\n--- WebSocket Message Received ---');
       const message = JSON.parse(event.data);
+      console.log('Message type:', message.type);
       
       switch (message.type) {
         case 'transcription':
-          setTranscript(prev => {
-            const newSegments = message.segments.filter(newSegment => 
-              !prev.some(existingSegment => 
-                existingSegment.text === newSegment.text &&
-                Math.abs(existingSegment.start - newSegment.start) < 0.1
-              )
-            );
-            return [...prev, ...newSegments];
-          });
+          if (message.segments) {
+            console.log('Received segments:', {
+              count: message.segments.length,
+              lastSegment: message.segments[message.segments.length - 1]
+            });
+
+            setTranscriptHistory(prev => {
+              console.log('Previous history length:', prev.length);
+              const mergedSegments = mergeTranscripts(message.segments);
+              console.log('Merged segments length:', mergedSegments.length);
+              console.log('Last merged segment:', mergedSegments[mergedSegments.length - 1]);
+              return mergedSegments;
+            });
+          }
           break;
         case 'final_transcript':
-          setTranscript(message.segments);
+          console.log('Received final transcript:', {
+            segmentCount: message.segments.length
+          });
+          setTranscriptHistory([]);
+          setFinalTranscript(mergeTranscripts(message.segments));
           break;
         case 'summary':
-          setSummary(message.conversation.summary);
+          console.log('Received summary');
+          setSummary(message.summary);
           setIsProcessing(false);
           break;
         case 'error':
           console.error('Server error:', message.message);
           setIsProcessing(false);
-          // Show error toast or notification here
           break;
       }
+      console.log('--- WebSocket Message End ---\n');
     };
 
     ws.onclose = () => {
@@ -89,6 +136,9 @@ const App = () => {
       
       audioChunks.current = [];
       setRecordingTime(0);
+      setTranscriptHistory([]);
+      setFinalTranscript([]);
+      setSummary('');
       
       timerRef.current = setInterval(() => {
         setRecordingTime(prev => prev + 1);
@@ -98,10 +148,12 @@ const App = () => {
         if (event.data.size > 0) {
           audioChunks.current.push(event.data);
           event.data.arrayBuffer().then(buffer => {
-            wsRef.current.send(JSON.stringify({
-              type: 'audio',
-              data: Array.from(new Uint8Array(buffer))
-            }));
+            if (wsRef.current?.readyState === WebSocket.OPEN) {
+              wsRef.current.send(JSON.stringify({
+                type: 'audio',
+                data: Array.from(new Uint8Array(buffer))
+              }));
+            }
           });
         }
       };
@@ -109,15 +161,15 @@ const App = () => {
       mediaRecorder.current.onstop = () => {
         clearInterval(timerRef.current);
         setIsProcessing(true);
-        wsRef.current.send(JSON.stringify({
-          type: 'end_recording'
-        }));
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({
+            type: 'end_recording'
+          }));
+        }
       };
 
       mediaRecorder.current.start(1000);
       setIsRecording(true);
-      setTranscript([]);
-      setSummary('');
     } catch (error) {
       console.error('Error starting recording:', error);
     }
@@ -187,13 +239,13 @@ const App = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="bg-gray-800 rounded-xl p-6 shadow-xl">
             <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
-              Live Transcript
+              Audio Transcript
               {isRecording && <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />}
             </h2>
             <div className="h-96 overflow-y-auto space-y-3 custom-scrollbar">
-              {transcript.map((segment, index) => (
+              {finalTranscript.map((segment, index) => (
                 <div 
-                  key={index} 
+                  key={`final-${index}`} 
                   className={`p-3 rounded-lg ${
                     segment.speaker === 'Speaker A' 
                       ? 'bg-blue-900/50 ml-4' 
@@ -208,16 +260,34 @@ const App = () => {
                   <div>{segment.text}</div>
                 </div>
               ))}
+
+              {isRecording && transcriptHistory.map((segment, index) => (
+                <div 
+                  key={`interim-${index}`}
+                  className={`p-3 rounded-lg ${
+                    segment.speaker === 'Speaker A' 
+                      ? 'bg-blue-900/30 ml-4' 
+                      : 'bg-green-900/30 mr-4'
+                  } animate-pulse`}
+                >
+                  <div className={`font-semibold mb-1 ${
+                    segment.speaker === 'Speaker A' ? 'text-blue-400' : 'text-green-400'
+                  }`}>
+                    {segment.speaker}
+                  </div>
+                  <div>{segment.text}</div>
+                </div>
+              ))}
+              <div ref={transcriptEndRef} />
             </div>
           </div>
 
-          
-            <div className="bg-gray-800 rounded-xl p-6 shadow-xl">
-              <h2 className="text-xl font-semibold mb-4">Summary</h2>
-              <div className="prose prose-invert max-w-none">
-                <div className="whitespace-pre-wrap">{summary}</div>
-              </div>
+          <div className="bg-gray-800 rounded-xl p-6 shadow-xl">
+            <h2 className="text-xl font-semibold mb-4">Summary</h2>
+            <div className="prose prose-invert max-w-none">
+              <div className="whitespace-pre-wrap">{summary}</div>
             </div>
+          </div>
         </div>
       </div>
     </div>
