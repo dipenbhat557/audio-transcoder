@@ -12,6 +12,9 @@ const App = () => {
   const [recordingTime, setRecordingTime] = useState(0);
   const [question, setQuestion] = useState('');
   const [answer, setAnswer] = useState('');
+  const [questionHistory, setQuestionHistory] = useState([]);
+  const [activeTab, setActiveTab] = useState('transcript');
+  const [isGeneratingAnswer, setIsGeneratingAnswer] = useState(false);
   
   const mediaRecorder = useRef(null);
   const wsRef = useRef(null);
@@ -21,6 +24,7 @@ const App = () => {
 
   useEffect(() => {
     connectWebSocket();
+    window.scrollTo(0, 0);
     return () => {
       if (wsRef.current) wsRef.current.close();
       if (timerRef.current) clearInterval(timerRef.current);
@@ -28,10 +32,11 @@ const App = () => {
   }, []);
 
   useEffect(() => {
+    if (!answer) return;
     if (transcriptEndRef.current) {
       transcriptEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [transcriptHistory, finalTranscript]);
+  }, [answer]);
 
   const mergeTranscripts = (segments) => {
     console.log('\n--- Merging Transcripts ---');
@@ -184,6 +189,11 @@ const App = () => {
     if (mediaRecorder.current && isRecording) {
       mediaRecorder.current.stop();
       setIsRecording(false);
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({
+          type: 'end_recording'
+        }));
+      }
     }
   };
 
@@ -194,27 +204,36 @@ const App = () => {
   };
 
   const handleAskQuestion = async () => {
-    if (!question) return;
+    if (!question.trim()) return;
+    
+    setIsGeneratingAnswer(true);
     try {
-      // Generate embedding for the question
-      const embeddingResponse = await fetch(`${import.meta.env.VITE_API_URL}/embed`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question })
-      });
-      const { embedding } = await embeddingResponse.json();
+        const embeddingResponse = await fetch(`${import.meta.env.VITE_API_URL}/embed`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ question })
+        });
+        const { embedding } = await embeddingResponse.json();
 
-      // Query Pinecone with the generated embedding
-      const queryResponse = await fetch(`${import.meta.env.VITE_API_URL}/query`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ vector: embedding })
-      });
-      const data = await queryResponse.json();
-      setAnswer(data.results); // Assuming the response contains the results
+        const response = await fetch(`${import.meta.env.VITE_API_URL}/query`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ vector: embedding, question })
+        });
+        const data = await response.json();
+        
+        setQuestionHistory(prev => [...prev, { 
+            question, 
+            answer: data.answer,
+            timestamp: new Date().toISOString()
+        }]);
+        setQuestion('');
+        setAnswer(data.answer);
     } catch (error) {
-      console.error('Error asking question:', error);
-      setAnswer('Error getting answer.');
+        console.error('Error asking question:', error);
+        setAnswer('Error getting answer.');
+    } finally {
+        setIsGeneratingAnswer(false);
     }
   };
 
@@ -266,77 +285,135 @@ const App = () => {
           )}
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="bg-gray-800 rounded-xl p-6 shadow-xl">
-            <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
-              Audio Transcript
-              {isRecording && <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />}
-            </h2>
-            <div className="h-96 overflow-y-auto space-y-3 custom-scrollbar">
-              {finalTranscript.map((segment, index) => (
-                <div 
-                  key={`final-${index}`} 
-                  className={`p-3 rounded-lg ${
-                    segment.speaker === 'Speaker A' 
-                      ? 'bg-blue-900/50 ml-4' 
-                      : 'bg-green-900/50 mr-4'
+        <div className="flex space-x-4 border-b border-gray-700">
+          <button
+            onClick={() => setActiveTab('transcript')}
+            className={`px-4 cursor-pointer py-2 font-medium transition-colors ${
+              activeTab === 'transcript' ? 'tab-active' : 'text-gray-400 hover:text-white'
+            }`}
+          >
+            Transcript & Summary
+          </button>
+          <button
+            onClick={() => setActiveTab('chat')}
+            className={`px-4 cursor-pointer py-2 font-medium transition-colors ${
+              activeTab === 'chat' ? 'tab-active' : 'text-gray-400 hover:text-white'
+            }`}
+          >
+            Chat Assistant
+          </button>
+        </div>
+
+        {activeTab === 'transcript' ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="bg-gray-800 rounded-xl p-6 shadow-xl">
+              <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+                Audio Transcript
+                {isRecording && <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />}
+              </h2>
+              <div className="h-96 overflow-y-auto space-y-3 custom-scrollbar">
+                {finalTranscript.map((segment, index) => (
+                  <div 
+                    key={`final-${index}`} 
+                    className={`p-3 rounded-lg ${
+                      segment.speaker === 'Speaker A' 
+                        ? 'bg-blue-900/50 ml-4' 
+                        : 'bg-green-900/50 mr-4'
+                    }`}
+                  >
+                    <div className={`font-semibold mb-1 ${
+                      segment.speaker === 'Speaker A' ? 'text-blue-400' : 'text-green-400'
+                    }`}>
+                      {segment.speaker}
+                    </div>
+                    <div>{segment.text}</div>
+                  </div>
+                ))}
+
+                {isRecording && transcriptHistory.map((segment, index) => (
+                  <div 
+                    key={`interim-${index}`}
+                    className={`p-3 rounded-lg ${
+                      segment.speaker === 'Speaker A' 
+                        ? 'bg-blue-900/30 ml-4' 
+                        : 'bg-green-900/30 mr-4'
+                    } animate-pulse`}
+                  >
+                    <div className={`font-semibold mb-1 ${
+                      segment.speaker === 'Speaker A' ? 'text-blue-400' : 'text-green-400'
+                    }`}>
+                      {segment.speaker}
+                    </div>
+                    <div>{segment.text}</div>
+                  </div>
+                ))}
+                <div ref={transcriptEndRef} />
+              </div>
+            </div>
+
+            <div className="bg-gray-800 rounded-xl p-6 shadow-xl">
+              <h2 className="text-xl font-semibold mb-4">Summary</h2>
+              <div className="prose prose-invert max-w-none">
+                <div className="whitespace-pre-wrap">{summary}</div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="bg-gray-800 rounded-xl shadow-xl overflow-y-auto flex flex-col h-[300px]">
+            <div className="flex-1 p-6 overflow-y-auto custom-scrollbar space-y-4">
+              {questionHistory.map((item, index) => (
+                <div key={index} className="space-y-2">
+                  <div className="flex justify-end">
+                    <div className="bg-blue-600 rounded-lg p-3 max-w-[80%] chat-bubble">
+                      <p className="text-white">{item.question}</p>
+                    </div>
+                  </div>
+                  <div className="flex justify-start">
+                    <div className="bg-gray-700 rounded-lg p-3 max-w-[80%] chat-bubble">
+                      <p className="text-white">{item.answer}</p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {isGeneratingAnswer && (
+                <div className="flex justify-start">
+                  <div className="bg-gray-700 rounded-lg p-3">
+                    <div className="typing-indicator">
+                      <div className="typing-dot"></div>
+                      <div className="typing-dot"></div>
+                      <div className="typing-dot"></div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="p-4 border-t border-gray-700">
+              <div className="flex space-x-2">
+                <input
+                  type="text"
+                  value={question}
+                  onChange={(e) => setQuestion(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && handleAskQuestion()}
+                  className="flex-1 p-2 rounded bg-gray-700 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Ask about the conversation..."
+                  disabled={isGeneratingAnswer}
+                />
+                <button
+                  onClick={handleAskQuestion}
+                  disabled={isGeneratingAnswer}
+                  className={`px-4 py-2 rounded font-medium transition-colors ${
+                    isGeneratingAnswer 
+                      ? 'bg-gray-600 cursor-not-allowed'
+                      : 'bg-blue-600 hover:bg-blue-700'
                   }`}
                 >
-                  <div className={`font-semibold mb-1 ${
-                    segment.speaker === 'Speaker A' ? 'text-blue-400' : 'text-green-400'
-                  }`}>
-                    {segment.speaker}
-                  </div>
-                  <div>{segment.text}</div>
-                </div>
-              ))}
-
-              {isRecording && transcriptHistory.map((segment, index) => (
-                <div 
-                  key={`interim-${index}`}
-                  className={`p-3 rounded-lg ${
-                    segment.speaker === 'Speaker A' 
-                      ? 'bg-blue-900/30 ml-4' 
-                      : 'bg-green-900/30 mr-4'
-                  } animate-pulse`}
-                >
-                  <div className={`font-semibold mb-1 ${
-                    segment.speaker === 'Speaker A' ? 'text-blue-400' : 'text-green-400'
-                  }`}>
-                    {segment.speaker}
-                  </div>
-                  <div>{segment.text}</div>
-                </div>
-              ))}
-              <div ref={transcriptEndRef} />
+                  Send
+                </button>
+              </div>
             </div>
           </div>
-
-          <div className="bg-gray-800 rounded-xl p-6 shadow-xl">
-            <h2 className="text-xl font-semibold mb-4">Summary</h2>
-            <div className="prose prose-invert max-w-none">
-              <div className="whitespace-pre-wrap">{summary}</div>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-gray-800 rounded-xl p-6 shadow-xl">
-          <h2 className="text-xl font-semibold mb-4">Ask a Question</h2>
-          <input
-            type="text"
-            value={question}
-            onChange={(e) => setQuestion(e.target.value)}
-            className="w-full p-2 rounded bg-gray-700 text-white"
-            placeholder="Type your question here..."
-          />
-          <button
-            onClick={handleAskQuestion}
-            className="mt-2 w-full p-2 bg-blue-600 rounded hover:bg-blue-700"
-          >
-            Ask
-          </button>
-          {answer && <div className="mt-4 text-white">Answer: {answer}</div>}
-        </div>
+        )}
       </div>
     </div>
   );

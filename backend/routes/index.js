@@ -5,23 +5,18 @@ const path = require('path');
 const fs = require('fs');
 const dotenv = require('dotenv');
 const multer = require('multer');
+const { Pinecone } = require('@pinecone-database/pinecone');
 
 dotenv.config();
 
-// Create uploads directory if it doesn't exist
 const uploadsDir = path.join(__dirname, '../uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-// Configure multer for audio file uploads
 const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, uploadsDir)
-  },
-  filename: function (req, file, cb) {
-    cb(null, Date.now() + '-' + file.originalname)
-  }
+  destination: (req, file, cb) => cb(null, uploadsDir),
+  filename: (req, file, cb) => cb(null, Date.now() + '-' + file.originalname)
 });
 
 const upload = multer({ 
@@ -29,7 +24,6 @@ const upload = multer({
   fileFilter: (req, file, cb) => {
     const allowedTypes = ['audio/flac', 'audio/mp3', 'audio/mp4', 'audio/mpeg', 
                          'audio/mpga', 'audio/m4a', 'audio/ogg', 'audio/wav', 'audio/webm'];
-    // Also check file extension since MIME types might not be reliable
     const fileExtension = path.extname(file.originalname).toLowerCase();
     const validExtensions = ['.flac', '.mp3', '.mp4', '.mpeg', '.mpga', '.m4a', '.ogg', '.wav', '.webm'];
     
@@ -45,18 +39,14 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// Helper function to detect speaker changes
 function detectSpeakerChanges(segments) {
   return segments.map((segment, index) => {
-    // First segment is always Speaker A
     if (index === 0) return { ...segment, speaker: 'Speaker A' };
 
     const prevSegment = segments[index - 1];
     const timeGap = segment.start - prevSegment.end;
     const prevSpeaker = prevSegment.speaker;
 
-    // Change speaker if there's a significant pause (> 1 second)
-    // or if there's a clear discourse marker
     const discourseMarkers = ['but', 'well', 'so', 'okay', 'right', 'um', 'uh'];
     const startsWithMarker = discourseMarkers.some(marker => 
       segment.text.toLowerCase().trim().startsWith(marker)
@@ -84,7 +74,6 @@ router.post('/upload', upload.single('audio'), async (req, res) => {
       "tests_assets_test.mp3"
     );
 
-    // First get the transcription
     const transcript = await openai.audio.transcriptions.create({
       file: openAIFile,
       model: 'whisper-1',
@@ -94,7 +83,6 @@ router.post('/upload', upload.single('audio'), async (req, res) => {
       language: 'en'
     });
 
-    // Then use completions API to analyze the conversation
     const completion = await openai.completions.create({
       model: "gpt-3.5-turbo-instruct",
       prompt: `Analyze this conversation transcript and identify different speakers. Format your response as JSON with speaker assignments.
@@ -112,23 +100,20 @@ Return a JSON object with a 'segments' array where each segment has:
       top_p: 0.8,
       frequency_penalty: 0.5,
       presence_penalty: 0.5,
-      stop: ["```"],  // Stop at code blocks
-      n: 1,  // Generate one completion
+      stop: ["```"],
+      n: 1,
     });
 
     let speakerSegments;
     try {
-      // Extract the JSON from the completion text
       const jsonMatch = completion.choices[0].text.match(/\{[\s\S]*\}/);
       const gptAnalysis = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
       speakerSegments = gptAnalysis?.segments;
     } catch (e) {
       console.error('Failed to parse GPT analysis, falling back to simple detection:', e);
-      // Fallback to our simple speaker detection if GPT analysis fails
       speakerSegments = detectSpeakerChanges(transcript.segments);
     }
 
-    // Process and format the final segments
     const formattedSegments = speakerSegments.map(segment => ({
       speaker: segment.speaker || 'Unknown Speaker',
       text: segment.text,
@@ -152,7 +137,6 @@ Return a JSON object with a 'segments' array where each segment has:
   }
 });
 
-
 router.post('/embed', async (req, res) => {
   const { question } = req.body;
   try {
@@ -166,22 +150,53 @@ router.post('/embed', async (req, res) => {
   }
 });
 
+const indexName = 'recording-index';
+const pc = new Pinecone({
+  apiKey: process.env.PINECONE_API_KEY
+});
+
 router.post('/query', async (req, res) => {
   const { vector } = req.body;
   try {
-    const index = pc.Index(indexName);
-    const queryResponse = await index.query({
+    console.log("vector", vector);
+    const index = pc.index(indexName);
+    const queryResponse = await index.namespace('ns1').query({
       vector,
-      top_k: 5, // Number of results to return
-      include_metadata: true
+      topK: 5,
+      includeValues: false,
+      includeMetadata: true,
     });
-    res.json({ results: queryResponse.matches });
+    console.log("queryResponse", queryResponse);
+    
+    const results = queryResponse.matches.map(match => ({
+      id: match.id,
+      score: match.score,
+      summary: match.metadata.summary
+    }));
+    console.log("results", results);
+
+    const prompt = `Based on the following summaries, provide a detailed answer to the user's question. Do not include any other text than the answer. Keep it short and concise:\n\n` +
+                   `User's question: ${req.body.question}\n\n` +
+                   `Summaries:\n${results.map(r => r.summary).join('\n')}`;
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-3.5-turbo",
+      messages: [
+        { role: "user", content: prompt }
+      ],
+    });
+
+    const answer = completion.choices[0].message.content;
+
+    console.log("answer", answer);
+
+    res.json({ results, answer });
   } catch (error) {
+    console.log("error", error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// Error handling middleware for multer errors
 router.use((error, req, res, next) => {
   if (error instanceof multer.MulterError) {
     return res.status(400).json({
@@ -196,6 +211,5 @@ router.use((error, req, res, next) => {
   }
   next();
 });
-
 
 module.exports = router;

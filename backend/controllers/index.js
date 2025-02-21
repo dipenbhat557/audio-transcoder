@@ -1,10 +1,11 @@
-const { PrismaClient } = require("@prisma/client");
 const OpenAI = require("openai");
 const fs = require("fs").promises;
 const fsSync = require("fs");
 const path = require("path");
 const { Pinecone } = require("@pinecone-database/pinecone");
 const crypto = require("crypto");
+const ffmpeg = require('fluent-ffmpeg');
+const { PrismaClient } = require("@prisma/client");
 
 const prisma = new PrismaClient();
 const openai = new OpenAI({
@@ -135,68 +136,81 @@ class WebSocketController {
 
 	async handleAudioMessage(ws, message, sessionData) {
 		console.log("\n--- Handle Audio Message Start ---");
-
+		
 		const audioBuffer = Buffer.from(message.data);
 		sessionData.audioChunks.push(audioBuffer);
-
-		// Process after accumulating enough data
-		if (sessionData.audioChunks.length >= 5) {
-			const tempFilePath = await this.getTempFilePath(ws);
-			sessionData.tempFiles.add(tempFilePath);
-
-			try {
-				// Create a copy of chunks for processing while maintaining the original
-				const chunksToProcess = Buffer.concat(sessionData.audioChunks);
-				await fs.writeFile(tempFilePath, chunksToProcess);
-
-				const fileStream = fsSync.createReadStream(tempFilePath);
-				const audioFile = await OpenAI.toFile(fileStream, "audio.webm");
-
-				const transcript = await openai.audio.transcriptions.create({
-					file: audioFile,
-					model: "whisper-1",
-					response_format: "verbose_json",
-					language: "en",
-				});
-
-				if (transcript?.segments) {
-					const segments = transcript.segments.map((segment) => ({
-						speaker: "Speaker A",
-						text: segment.text,
-						start: segment.start,
-						end: segment.end,
-					}));
-
-					ws.send(JSON.stringify({ type: "transcription", segments }));
-					await this.indexSegmentsInPinecone(segments);
-				}
-
-				// Clear processed chunks but keep the most recent one for context
-				const lastChunk = sessionData.audioChunks[sessionData.audioChunks.length - 1];
-				sessionData.audioChunks = [lastChunk];
-
-			} catch (error) {
-				console.error("Transcription error:", error);
-				ws.send(JSON.stringify({ 
-					type: "error", 
-					message: "Failed to process audio segment" 
-				}));
-			} finally {
-				// Clean up temp file
-				try {
-					if (await fs.access(tempFilePath).then(() => true).catch(() => false)) {
-						await fs.unlink(tempFilePath);
-						sessionData.tempFiles.delete(tempFilePath);
-					} else {
-						console.log(`Temp file ${tempFilePath} does not exist, skipping deletion.`);
-					}
-				} catch (error) {
-					console.error("Error deleting temp file:", error);
-				}
-			}
-		}
-
+		
+		// Commenting out real-time transcription
+		// if (sessionData.audioChunks.length >= 5) {
+		//     const tempFilePath = await this.getTempFilePath(ws);
+		//     sessionData.tempFiles.add(tempFilePath);
+		//     
+		//     let readStream;
+		//     try {
+		//         const chunksToProcess = Buffer.concat(sessionData.audioChunks);
+		//         console.log(`Writing ${chunksToProcess.length} bytes to ${tempFilePath}`);
+		//         await fs.writeFile(tempFilePath, chunksToProcess);
+		//         
+		//         readStream = fsSync.createReadStream(tempFilePath);
+		//         const audioFile = await OpenAI.toFile(readStream, "audio.webm");
+		//         
+		//         console.log(`Sending audio file to OpenAI: ${tempFilePath}`);
+		//         const transcript = await openai.audio.transcriptions.create({
+		//             file: audioFile,
+		//             model: "whisper-1",
+		//             response_format: "verbose_json",
+		//             language: "en",
+		//         });
+		//         
+		//         if (transcript?.segments) {
+		//             const segments = transcript.segments.map((segment) => ({
+		//                 speaker: "Speaker A",
+		//                 text: segment.text,
+		//                 start: segment.start,
+		//                 end: segment.end,
+		//             }));
+		//             
+		//             ws.send(JSON.stringify({ type: "transcription", segments }));
+		//             await this.indexSegmentsInPinecone(segments);
+		//         }
+		//         
+		//         sessionData.audioChunks = [];
+		//         
+		//     } catch (error) {
+		//         console.error("Transcription error:", error);
+		//         ws.send(JSON.stringify({ 
+		//             type: "error", 
+		//             message: "Failed to process audio segment" 
+		//         }));
+		//     } finally {
+		//         if (readStream) {
+		//             readStream.destroy();
+		//         }
+		//         
+		//         try {
+		//             if (await fs.access(tempFilePath).then(() => true).catch(() => false)) {
+		//                 await fs.unlink(tempFilePath);
+		//                 sessionData.tempFiles.delete(tempFilePath);
+		//             }
+		//         } catch (error) {
+		//             console.error("Error deleting temp file:", error);
+		//         }
+		//     }
+		// }
+		
 		console.log("--- Handle Audio Message End ---\n");
+	}
+
+	// Function to get audio metadata using ffprobe
+	async getAudioMetadata(stream) {
+		return new Promise((resolve, reject) => {
+			ffmpeg.ffprobe(stream, (err, metadata) => {
+				if (err) {
+					return reject(err);
+				}
+				resolve(metadata);
+			});
+		});
 	}
 
 	async indexSegmentsInPinecone(segments) {
@@ -370,6 +384,9 @@ Return a valid JSON object like this example (use exact format):
 			const segments = await this.processAudioWithDiarization(audioFile);
 			const summary = await this.generateSummary(segments);
 
+			// Store only the summary in Pinecone
+			await this.storeSummaryInPinecone(summary);
+
 			const conversation = await prisma.conversation.create({
 				data: {
 					transcript: { segments },
@@ -420,6 +437,21 @@ Return a valid JSON object like this example (use exact format):
 		});
 
 		return completion.choices[0].message.content;
+	}
+
+	// New method to store summary in Pinecone
+	async storeSummaryInPinecone(summary) {
+		const index = pc.index(indexName);
+		const vector = await openai.embeddings.create({
+			input: summary,
+			model: "text-embedding-ada-002",
+		});
+
+		await index.namespace('ns1').upsert([{
+			id: Date.now().toString(), // Use a unique ID for the summary
+			values: vector.data[0].embedding,
+			metadata: { summary } // Store the summary as metadata
+		}]);
 	}
 }
 
