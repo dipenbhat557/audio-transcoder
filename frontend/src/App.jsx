@@ -10,6 +10,8 @@ const App = () => {
   const [isConnected, setIsConnected] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
+  const [question, setQuestion] = useState('');
+  const [answer, setAnswer] = useState('');
   
   const mediaRecorder = useRef(null);
   const wsRef = useRef(null);
@@ -37,6 +39,9 @@ const App = () => {
     
     const merged = segments.reduce((acc, curr) => {
       const last = acc[acc.length - 1];
+
+      console.log("last", last);
+      console.log("curr", curr);
       
       if (last && last.speaker === curr.speaker && 
           curr.start - last.end < 2.0) {
@@ -47,7 +52,7 @@ const App = () => {
         // Merge with previous segment
         last.text = `${last.text} ${curr.text}`;
         last.end = curr.end;
-        last.words = [...last.words, ...curr.words];
+        // last.words = [...last.text, ...curr.text];
         return acc;
       }
       
@@ -188,6 +193,31 @@ const App = () => {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  const handleAskQuestion = async () => {
+    if (!question) return;
+    try {
+      // Generate embedding for the question
+      const embeddingResponse = await fetch(`${import.meta.env.VITE_API_URL}/embed`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question })
+      });
+      const { embedding } = await embeddingResponse.json();
+
+      // Query Pinecone with the generated embedding
+      const queryResponse = await fetch(`${import.meta.env.VITE_API_URL}/query`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vector: embedding })
+      });
+      const data = await queryResponse.json();
+      setAnswer(data.results); // Assuming the response contains the results
+    } catch (error) {
+      console.error('Error asking question:', error);
+      setAnswer('Error getting answer.');
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800 text-white p-8">
       <div className="max-w-4xl mx-auto space-y-8">
@@ -288,6 +318,24 @@ const App = () => {
               <div className="whitespace-pre-wrap">{summary}</div>
             </div>
           </div>
+        </div>
+
+        <div className="bg-gray-800 rounded-xl p-6 shadow-xl">
+          <h2 className="text-xl font-semibold mb-4">Ask a Question</h2>
+          <input
+            type="text"
+            value={question}
+            onChange={(e) => setQuestion(e.target.value)}
+            className="w-full p-2 rounded bg-gray-700 text-white"
+            placeholder="Type your question here..."
+          />
+          <button
+            onClick={handleAskQuestion}
+            className="mt-2 w-full p-2 bg-blue-600 rounded hover:bg-blue-700"
+          >
+            Ask
+          </button>
+          {answer && <div className="mt-4 text-white">Answer: {answer}</div>}
         </div>
       </div>
     </div>

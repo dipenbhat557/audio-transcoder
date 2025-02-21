@@ -152,6 +152,35 @@ Return a JSON object with a 'segments' array where each segment has:
   }
 });
 
+
+router.post('/embed', async (req, res) => {
+  const { question } = req.body;
+  try {
+    const embeddingResponse = await openai.embeddings.create({
+      input: question,
+      model: 'text-embedding-ada-002'
+    });
+    res.json({ embedding: embeddingResponse.data[0].embedding });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/query', async (req, res) => {
+  const { vector } = req.body;
+  try {
+    const index = pc.Index(indexName);
+    const queryResponse = await index.query({
+      vector,
+      top_k: 5, // Number of results to return
+      include_metadata: true
+    });
+    res.json({ results: queryResponse.matches });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Error handling middleware for multer errors
 router.use((error, req, res, next) => {
   if (error instanceof multer.MulterError) {
@@ -167,5 +196,6 @@ router.use((error, req, res, next) => {
   }
   next();
 });
+
 
 module.exports = router;
