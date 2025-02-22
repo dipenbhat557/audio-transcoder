@@ -198,6 +198,7 @@ class WebSocketController {
 				JSON.stringify({
 					type: "summary",
 					summary: conversation.summary,
+					segments // Send segments back for display if needed
 				})
 			);
 

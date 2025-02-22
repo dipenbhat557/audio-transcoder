@@ -9,32 +9,14 @@ const Transcript = ({ finalTranscript, transcriptHistory, summary, isRecording }
           {isRecording && <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />}
         </h2>
         <div className="h-96 overflow-y-auto space-y-3 custom-scrollbar">
-          {finalTranscript.map((segment, index) => (
+          {transcriptHistory.map((segment, index) => (
             <div 
-              key={`final-${index}`} 
+              key={`transcript-${index}`} 
               className={`p-3 rounded-lg ${
                 segment.speaker === 'Speaker A' 
                   ? 'bg-blue-900/50 ml-4' 
                   : 'bg-green-900/50 mr-4'
               }`}
-            >
-              <div className={`font-semibold mb-1 ${
-                segment.speaker === 'Speaker A' ? 'text-blue-400' : 'text-green-400'
-              }`}>
-                {segment.speaker}
-              </div>
-              <div>{segment.text}</div>
-            </div>
-          ))}
-
-          {isRecording && transcriptHistory.map((segment, index) => (
-            <div 
-              key={`interim-${index}`}
-              className={`p-3 rounded-lg ${
-                segment.speaker === 'Speaker A' 
-                  ? 'bg-blue-900/30 ml-4' 
-                  : 'bg-green-900/30 mr-4'
-              } animate-pulse`}
             >
               <div className={`font-semibold mb-1 ${
                 segment.speaker === 'Speaker A' ? 'text-blue-400' : 'text-green-400'
