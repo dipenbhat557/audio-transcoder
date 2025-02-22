@@ -86,30 +86,30 @@ const App = () => {
       console.log('Message type:', message.type);
       
       switch (message.type) {
-        case 'transcription':
-          if (message.segments) {
-            console.log('Received segments:', {
-              count: message.segments.length,
-              lastSegment: message.segments[message.segments.length - 1]
-            });
+        // case 'transcription':
+        //   if (message.segments) {
+        //     console.log('Received segments:', {
+        //       count: message.segments.length,
+        //       lastSegment: message.segments[message.segments.length - 1]
+        //     });
 
-            setTranscriptHistory(prev => {
-              console.log('Previous history length:', prev.length);
-              const mergedSegments = mergeTranscripts(message.segments);
-              console.log('Merged segments length:', mergedSegments.length);
-              console.log('Last merged segment:', mergedSegments[mergedSegments.length - 1]);
-              return mergedSegments;
-            });
-          }
-          break;
-        case 'final_transcript':
-          console.log('Received final transcript:', {
-            segmentCount: message.segments.length
-          });
-          setTranscriptHistory([]);
-          setFinalTranscript(mergeTranscripts(message.segments));
-          setIsProcessing(false);
-          break;
+        //     setTranscriptHistory(prev => {
+        //       console.log('Previous history length:', prev.length);
+        //       const mergedSegments = mergeTranscripts(message.segments);
+        //       console.log('Merged segments length:', mergedSegments.length);
+        //       console.log('Last merged segment:', mergedSegments[mergedSegments.length - 1]);
+        //       return mergedSegments;
+        //     });
+        //   }
+        //   break;
+        // case 'final_transcript':
+        //   console.log('Received final transcript:', {
+        //     segmentCount: message.segments.length
+        //   });
+        //   setTranscriptHistory([]);
+        //   setFinalTranscript(mergeTranscripts(message.segments));
+        //   setIsProcessing(false);
+        //   break;
         case 'summary':
           console.log('Received summary');
           setSummary(message.summary);
@@ -152,6 +152,7 @@ const App = () => {
           setIsRecording={setIsRecording} 
           isConnected={isConnected} 
           isProcessing={isProcessing} 
+          setIsProcessing={setIsProcessing}
           recordingTime={recordingTime} 
           setRecordingTime={setRecordingTime} 
           wsRef={wsRef}

@@ -1,0 +1,1 @@
+while Groq API is fast enough to provide near real-time transcriptions from files, it does not seem to support true live streaming transcription where audio is continuously processed as it's received.
