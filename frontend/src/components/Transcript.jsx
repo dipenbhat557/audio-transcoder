@@ -13,13 +13,13 @@ const Transcript = ({  transcriptHistory, summary, isRecording }) => {
             <div 
               key={`transcript-${index}`} 
               className={`p-3 rounded-lg ${
-                segment.speaker === 'Speaker A' 
+                segment.speaker === 'Speaker 1' 
                   ? 'bg-blue-900/50 ml-4' 
                   : 'bg-green-900/50 mr-4'
               }`}
             >
               <div className={`font-semibold mb-1 ${
-                segment.speaker === 'Speaker A' ? 'text-blue-400' : 'text-green-400'
+                segment.speaker === 'Speaker 1' ? 'text-blue-400' : 'text-green-400'
               }`}>
                 {segment.speaker}
               </div>

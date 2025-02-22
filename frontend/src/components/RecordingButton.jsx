@@ -2,7 +2,7 @@ import React, { useRef } from 'react';
 import { FaMicrophone, FaStop } from 'react-icons/fa';
 import Loader from './Loader';
 import { createClient, LiveTranscriptionEvents } from "@deepgram/sdk";
-
+import { v4 as uuidv4 } from 'uuid';
 const RecordingButton = ({ 
   isRecording, 
   setIsRecording, 
@@ -61,23 +61,31 @@ const RecordingButton = ({
         if (data.channel?.alternatives?.[0]) {
           const transcript = data.channel.alternatives[0];
           const segments = transcript.words.map(word => ({
-            speaker: `Speaker ${word.speaker+1}`,
+            speaker: `Speaker ${word.speaker + 1}`,
             text: word.word,
             start: word.start,
             end: word.end,
             words: transcript.words
           }));
 
-          const filteredSegments = segments.filter(segment => segment.text.trim() !== "");
+          const combinedSegments = segments.reduce((acc, curr) => {
+            if (acc.length === 0 || acc[acc.length - 1].speaker !== curr.speaker) {
+              acc.push({ ...curr, text: curr.text });
+            } else {
+              acc[acc.length - 1].text += ` ${curr.text}`;
+            }
+            return acc;
+          }, []);
+
           setTranscriptHistory(prev => {
             const existingTexts = new Set(prev.map(seg => seg.text));
-            return [...prev, ...filteredSegments.filter(seg => !existingTexts.has(seg.text))];
+            return [...prev, ...combinedSegments.filter(seg => !existingTexts.has(seg.text))];
           });
 
           if (wsRef.current?.readyState === WebSocket.OPEN) {
             wsRef.current.send(JSON.stringify({
               type: "transcript_update",
-              segments: filteredSegments
+              segments: combinedSegments
             }));
           }
         }
@@ -119,7 +127,9 @@ const RecordingButton = ({
         if (deepgramLive.current) {
           deepgramLive.current.requestClose();
         }
-        const namespace = localStorage.getItem('conversationNamespace');
+        const namespace = uuidv4();
+        localStorage.setItem('conversationNamespace', namespace);
+        
         if (wsRef.current?.readyState === WebSocket.OPEN) {
           wsRef.current.send(JSON.stringify({ type: 'end_recording', namespace }));
         }

@@ -24,6 +24,9 @@ const App = () => {
   useEffect(() => {
     connectWebSocket();
     window.scrollTo(0, 0);
+    if(transcriptHistory.length === 0) {
+      localStorage.removeItem('conversationNamespace');
+    }
     return () => {
       if (wsRef.current) wsRef.current.close();
       if (timerRef.current) clearInterval(timerRef.current);

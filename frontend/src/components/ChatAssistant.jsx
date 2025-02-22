@@ -1,11 +1,31 @@
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
 
 const ChatAssistant = ({ question, setQuestion, questionHistory, setQuestionHistory, isGeneratingAnswer, setIsGeneratingAnswer, setAnswer }) => {
+
+  const chatContainerRef = useRef(null);
+
+  useEffect(() => {
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+    }
+  }, [questionHistory]);
+
   const handleAskQuestion = async () => {
     if (!question.trim()) return;
     setIsGeneratingAnswer(true);
     try {
       const namespace = localStorage.getItem('conversationNamespace');
+      if(!namespace) {
+        setAnswer('No conversation found. Please start a new conversation.');
+        setQuestionHistory(prev => [...prev, { 
+          question, 
+          answer: 'No conversation found. Please start a new conversation.',
+          timestamp: new Date().toISOString()
+        }]);
+        setIsGeneratingAnswer(false);
+        setQuestion('');
+        return;
+      }
 
       const response = await fetch(`${import.meta.env.VITE_API_URL}/query`, {
         method: 'POST',
@@ -30,7 +50,7 @@ const ChatAssistant = ({ question, setQuestion, questionHistory, setQuestionHist
 
   return (
     <div className="bg-gray-800 rounded-xl shadow-xl overflow-y-auto flex flex-col h-[300px]">
-      <div className="flex-1 p-6 overflow-y-auto custom-scrollbar space-y-4">
+      <div className="flex-1 p-6 overflow-y-auto custom-scrollbar space-y-4" ref={chatContainerRef}>
         {questionHistory.map((item, index) => (
           <div key={index} className="space-y-2">
             <div className="flex justify-end">

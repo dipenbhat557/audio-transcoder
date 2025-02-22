@@ -29,7 +29,7 @@ router.post("/query", async (req, res) => {
 		}));
 
 		const prompt =
-			`Based on the following summaries, provide a detailed answer to the user's question. Do not include any other text than the answer. Keep it short and concise:\n\n` +
+			`Answer the user's question directly based on the summaries below. Be brief and to the point:\n\n` +
 			`User's question: ${req.body.question}\n\n` +
 			`Summaries:\n${results.map((r) => r.summary).join("\n")}`;
 

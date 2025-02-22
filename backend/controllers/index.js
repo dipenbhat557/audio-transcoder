@@ -50,7 +50,7 @@ class WebSocketController {
 				}
 
 				if (message.type === "end_recording") {
-					await this.handleEndRecording(ws);
+					await this.handleEndRecording(ws, message.namespace);
 				}
 			} catch (error) {
 				ws.send(
@@ -138,7 +138,7 @@ class WebSocketController {
 		}
 	}
 
-	async handleEndRecording(ws) {
+	async handleEndRecording(ws, namespace) {
 		try {
 			const segments = this.transcriptionHistory.get(ws) || [];
 			
@@ -147,7 +147,6 @@ class WebSocketController {
 			}
 
 			const summary = await this.generateSummary(segments);
-			const namespace = ws.namespace;
 
 			const conversation = await prisma.conversation.create({
 				data: {
