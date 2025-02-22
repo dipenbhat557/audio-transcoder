@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_DEEPGRAM_API_KEY=${VITE_DEEPGRAM_API_KEY}
+      - VITE_API_URL=http://backend:3000/api
+      - VITE_WS_URL=ws://backend:3000
+    volumes:
+      - ./frontend:/app
+    command: pnpm dev
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - DATABASE_URL=${DATABASE_URL}
+      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - PINECONE_API_KEY=${PINECONE_API_KEY}
+      - PINECONE_INDEX_NAME=${PINECONE_INDEX_NAME}
+    volumes:
+      - ./backend:/app
+    command: pnpm dev
+
+networks:
+  default:
+    driver: bridge 
