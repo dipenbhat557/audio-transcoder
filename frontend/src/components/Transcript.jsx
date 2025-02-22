@@ -1,6 +1,6 @@
 import React from 'react';
 
-const Transcript = ({ finalTranscript, transcriptHistory, summary, isRecording }) => {
+const Transcript = ({  transcriptHistory, summary, isRecording }) => {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
       <div className="bg-gray-800 rounded-xl p-6 shadow-xl">

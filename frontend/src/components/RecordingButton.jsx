@@ -12,7 +12,7 @@ const RecordingButton = ({
   recordingTime,
   setRecordingTime,
   setTranscriptHistory,
-  wsRef // Reference to the local WebSocket
+  wsRef
 }) => {
   const mediaRecorder = useRef(null);
   const audioChunks = useRef([]);
@@ -41,10 +41,8 @@ const RecordingButton = ({
         audioBitsPerSecond: 128000
       };
 
-      // Initialize Deepgram client
       const deepgram = createClient(import.meta.env.VITE_DEEPGRAM_API_KEY);
       
-      // Create live transcription instance
       deepgramLive.current = deepgram.listen.live({
         model: "nova-3",
         language: "en",
@@ -53,13 +51,9 @@ const RecordingButton = ({
         diarize: true
       });
 
-      // Set up event listeners
-      deepgramLive.current.on(LiveTranscriptionEvents.Open, () => {
-        console.log("Connected to Deepgram");
-      });
+      deepgramLive.current.on(LiveTranscriptionEvents.Open, () => {});
 
       deepgramLive.current.on(LiveTranscriptionEvents.Transcript, (data) => {
-        console.log("Received transcript:", data);
         if (data.channel?.alternatives?.[0]) {
           const transcript = data.channel.alternatives[0];
           const segments = [{
@@ -72,7 +66,6 @@ const RecordingButton = ({
           
           setTranscriptHistory(prev => [...prev, ...segments]);
           
-          // Send to backend for storage
           if (wsRef.current?.readyState === WebSocket.OPEN) {
             wsRef.current.send(JSON.stringify({
               type: "transcript_update",
@@ -82,13 +75,9 @@ const RecordingButton = ({
         }
       });
 
-      deepgramLive.current.on(LiveTranscriptionEvents.Error, (error) => {
-        console.error("Deepgram error:", error);
-      });
+      deepgramLive.current.on(LiveTranscriptionEvents.Error, () => {});
 
-      deepgramLive.current.on(LiveTranscriptionEvents.Warning, (warning) => {
-        console.warn("Deepgram warning:", warning);
-      });
+      deepgramLive.current.on(LiveTranscriptionEvents.Warning, () => {});
 
       mediaRecorder.current = new MediaRecorder(stream, options);
       audioChunks.current = [];
@@ -103,12 +92,11 @@ const RecordingButton = ({
           audioChunks.current.push(event.data);
           const reader = new FileReader();
           reader.onloadend = () => {
-            if (deepgramLive.current?.getReadyState() === 1) { // 1 = OPEN
-              deepgramLive.current.send(reader.result); // Send audio data to Deepgram
+            if (deepgramLive.current?.getReadyState() === 1) {
+              deepgramLive.current.send(reader.result);
               deepgramLive.current.keepAlive();
-              // Send audio data to local WebSocket for storage
               if (wsRef.current?.readyState === WebSocket.OPEN) {
-                wsRef.current.send(reader.result); // Send audio data to local WS
+                wsRef.current.send(reader.result);
               }
             }
           };
@@ -129,7 +117,6 @@ const RecordingButton = ({
       setIsRecording(true);
       setIsProcessing(false);
     } catch (error) {
-      console.error('Error starting recording:', error);
       setIsProcessing(false);
     }
   };
@@ -137,7 +124,6 @@ const RecordingButton = ({
   const stopRecording = () => {
     if (mediaRecorder.current && isRecording) {
         mediaRecorder.current.stop();
-        // Do not clear transcript history here
         setIsRecording(false);
         setIsProcessing(true);
         if (wsRef.current?.readyState === WebSocket.OPEN) {

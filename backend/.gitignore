@@ -10,3 +10,4 @@ node_modules
 *.aac
 *.flac
 *.alac
+temp/*

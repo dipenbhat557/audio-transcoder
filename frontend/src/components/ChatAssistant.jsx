@@ -1,6 +1,6 @@
 import React from 'react';
 
-const ChatAssistant = ({ question, setQuestion, questionHistory, setQuestionHistory, isGeneratingAnswer, setIsGeneratingAnswer, answer, setAnswer, wsRef }) => {
+const ChatAssistant = ({ question, setQuestion, questionHistory, setQuestionHistory, isGeneratingAnswer, setIsGeneratingAnswer, setAnswer }) => {
   const handleAskQuestion = async () => {
     if (!question.trim()) return;
     setIsGeneratingAnswer(true);
