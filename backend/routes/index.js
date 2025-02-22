@@ -1,17 +1,7 @@
-const express = require("express");
-const router = express.Router();
-const OpenAI = require("openai");
-const path = require("path");
-const fs = require("fs");
-const dotenv = require("dotenv");
-const multer = require("multer");
-const { Pinecone } = require("@pinecone-database/pinecone");
+const { pc, indexName, openai } = require("../config");
+const { Router } = require("express");
 
-dotenv.config();
-
-const openai = new OpenAI({
-	apiKey: process.env.OPENAI_API_KEY,
-});
+const router = Router();
 
 router.post("/query", async (req, res) => {
 	const {  question, namespace } = req.body;
@@ -50,27 +40,11 @@ router.post("/query", async (req, res) => {
 
 		const answer = completion.choices[0].message.content;
 
-
 		res.json({ results, answer });
 	} catch (error) {
 		console.log("error", error);
 		res.status(500).json({ error: error.message });
 	}
-});
-
-router.use((error, req, res, next) => {
-	if (error instanceof multer.MulterError) {
-		return res.status(400).json({
-			error: "File upload error",
-			details: error.message,
-		});
-	} else if (error) {
-		return res.status(400).json({
-			error: "Invalid file type",
-			details: error.message,
-		});
-	}
-	next();
 });
 
 module.exports = router;

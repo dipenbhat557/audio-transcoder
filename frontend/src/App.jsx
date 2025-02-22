@@ -20,7 +20,6 @@ const App = () => {
   
   const wsRef = useRef(null);
   const timerRef = useRef(null);
-  const transcriptEndRef = useRef(null);
 
   useEffect(() => {
     connectWebSocket();
@@ -30,13 +29,6 @@ const App = () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, []);
-
-  useEffect(() => {
-    if (!answer) return;
-    if (transcriptEndRef.current) {
-      transcriptEndRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [answer]);
 
   const connectWebSocket = () => {
     const ws = new WebSocket(import.meta.env.VITE_WS_URL || 'ws://localhost:3000');
@@ -86,6 +78,7 @@ const App = () => {
           setRecordingTime={setRecordingTime} 
           wsRef={wsRef}
           setTranscriptHistory={setTranscriptHistory}
+          setSummary={setSummary}
         />
         <div className="flex space-x-4 border-b border-gray-700">
           <button

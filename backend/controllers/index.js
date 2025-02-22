@@ -1,17 +1,4 @@
-const OpenAI = require("openai");
-const { Pinecone } = require("@pinecone-database/pinecone");
-const { PrismaClient } = require("@prisma/client");
-
-const prisma = new PrismaClient();
-const openai = new OpenAI({
-	apiKey: process.env.OPENAI_API_KEY,
-});
-
-const pc = new Pinecone({
-	apiKey: process.env.PINECONE_API_KEY,
-});
-
-const indexName = "recording-index";
+const { pc, indexName, openai, prisma } = require("../config");
 
 async function createIndex() {
 	try {

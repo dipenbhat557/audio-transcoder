@@ -12,10 +12,10 @@ const RecordingButton = ({
   recordingTime,
   setRecordingTime,
   setTranscriptHistory,
+  setSummary,
   wsRef
 }) => {
   const mediaRecorder = useRef(null);
-  const audioChunks = useRef([]);
   const timerRef = useRef(null);
   const deepgramLive = useRef(null);
 
@@ -27,6 +27,8 @@ const RecordingButton = ({
 
   const startRecording = async () => {
     try {
+      setTranscriptHistory([]);
+      setSummary('');
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: {
           channelCount: 1,
@@ -58,20 +60,24 @@ const RecordingButton = ({
       deepgramLive.current.on(LiveTranscriptionEvents.Transcript, (data) => {
         if (data.channel?.alternatives?.[0]) {
           const transcript = data.channel.alternatives[0];
-          const segments = [{
-            speaker: "Speaker A",
-            text: transcript.transcript,
-            start: data.start || 0,
-            end: (data.start || 0) + (data.duration || 0),
-            words: transcript.words || []
-          }];
-          
-          setTranscriptHistory(prev => [...prev, ...segments]);
-          
+          const segments = transcript.words.map(word => ({
+            speaker: `Speaker ${word.speaker+1}`,
+            text: word.word,
+            start: word.start,
+            end: word.end,
+            words: transcript.words
+          }));
+
+          const filteredSegments = segments.filter(segment => segment.text.trim() !== "");
+          setTranscriptHistory(prev => {
+            const existingTexts = new Set(prev.map(seg => seg.text));
+            return [...prev, ...filteredSegments.filter(seg => !existingTexts.has(seg.text))];
+          });
+
           if (wsRef.current?.readyState === WebSocket.OPEN) {
             wsRef.current.send(JSON.stringify({
               type: "transcript_update",
-              segments
+              segments: filteredSegments
             }));
           }
         }
@@ -86,7 +92,6 @@ const RecordingButton = ({
       });
 
       mediaRecorder.current = new MediaRecorder(stream, options);
-      audioChunks.current = [];
       setRecordingTime(0);
 
       timerRef.current = setInterval(() => {
@@ -95,7 +100,6 @@ const RecordingButton = ({
 
       mediaRecorder.current.ondataavailable = (event) => {
         if (event.data.size > 0) {
-          audioChunks.current.push(event.data);
           const reader = new FileReader();
           reader.onloadend = () => {
             if (deepgramLive.current?.getReadyState() === 1) {
