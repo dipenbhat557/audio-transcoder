@@ -51,7 +51,9 @@ const RecordingButton = ({
         diarize: true
       });
 
-      deepgramLive.current.on(LiveTranscriptionEvents.Open, () => {});
+      deepgramLive.current.on(LiveTranscriptionEvents.Open, () => {
+        console.log("Connected to Deepgram");
+      });
 
       deepgramLive.current.on(LiveTranscriptionEvents.Transcript, (data) => {
         if (data.channel?.alternatives?.[0]) {
@@ -75,9 +77,13 @@ const RecordingButton = ({
         }
       });
 
-      deepgramLive.current.on(LiveTranscriptionEvents.Error, () => {});
+      deepgramLive.current.on(LiveTranscriptionEvents.Error, (error) => {
+        console.error("Deepgram error:", error);
+      });
 
-      deepgramLive.current.on(LiveTranscriptionEvents.Warning, () => {});
+      deepgramLive.current.on(LiveTranscriptionEvents.Warning, (warning) => {
+        console.warn("Deepgram warning:", warning);
+      });
 
       mediaRecorder.current = new MediaRecorder(stream, options);
       audioChunks.current = [];
@@ -109,6 +115,10 @@ const RecordingButton = ({
         if (deepgramLive.current) {
           deepgramLive.current.requestClose();
         }
+        const namespace = localStorage.getItem('conversationNamespace');
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({ type: 'end_recording', namespace }));
+        }
         setIsRecording(false);
         setIsProcessing(true);
       };
@@ -117,18 +127,14 @@ const RecordingButton = ({
       setIsRecording(true);
       setIsProcessing(false);
     } catch (error) {
+      console.error('Error starting recording:', error);
       setIsProcessing(false);
     }
   };
 
   const stopRecording = () => {
     if (mediaRecorder.current && isRecording) {
-        mediaRecorder.current.stop();
-        setIsRecording(false);
-        setIsProcessing(true);
-        if (wsRef.current?.readyState === WebSocket.OPEN) {
-            wsRef.current.send(JSON.stringify({ type: 'end_recording' }));
-        }
+      mediaRecorder.current.stop();
     }
   };
 

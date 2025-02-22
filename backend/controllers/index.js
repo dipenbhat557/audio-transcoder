@@ -103,7 +103,7 @@ class WebSocketController {
 		}
 	}
 
-	async storeSummaryInPinecone(summary, segments) {
+	async storeSummaryInPinecone(summary, segments, namespace) {
 		try {
 			const index = pc.index(indexName);
 
@@ -132,7 +132,7 @@ class WebSocketController {
 				})
 			);
 
-			await index.namespace("ns1").upsert([
+			await index.namespace(namespace).upsert([
 				{
 					id: `summary-${Date.now()}`,
 					values: summaryEmbedding.data[0].embedding,
@@ -146,6 +146,7 @@ class WebSocketController {
 			]);
 
 		} catch (error) {
+			console.error("Error storing in Pinecone:", error);
 			throw error;
 		}
 	}
@@ -159,6 +160,7 @@ class WebSocketController {
 			}
 
 			const summary = await this.generateSummary(segments);
+			const namespace = ws.namespace;
 
 			const conversation = await prisma.conversation.create({
 				data: {
@@ -167,7 +169,7 @@ class WebSocketController {
 				}
 			});
 
-			await this.storeSummaryInPinecone(summary, segments);
+			await this.storeSummaryInPinecone(summary, segments, namespace);
 
 			ws.send(
 				JSON.stringify({

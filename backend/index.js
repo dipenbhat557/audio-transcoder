@@ -12,7 +12,12 @@ const port = process.env.PORT || 3000;
 
 app.use(express.json());
 app.use(cors());
-app.use('/', routes);
+
+app.get("/", (req, res) => {
+	res.send("Hello World!");
+});
+
+app.use('/api', routes);
 
 wss.on('connection', (ws) => {
   webSocketController.handleConnection(ws);

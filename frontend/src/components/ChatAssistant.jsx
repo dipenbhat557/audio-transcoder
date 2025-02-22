@@ -5,17 +5,12 @@ const ChatAssistant = ({ question, setQuestion, questionHistory, setQuestionHist
     if (!question.trim()) return;
     setIsGeneratingAnswer(true);
     try {
-      const embeddingResponse = await fetch(`${import.meta.env.VITE_API_URL}/embed`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question })
-      });
-      const { embedding } = await embeddingResponse.json();
+      const namespace = localStorage.getItem('conversationNamespace');
 
       const response = await fetch(`${import.meta.env.VITE_API_URL}/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ vector: embedding, question })
+        body: JSON.stringify({ question, namespace })
       });
       const data = await response.json();
       setQuestionHistory(prev => [...prev, { 

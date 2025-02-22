@@ -13,33 +13,19 @@ const openai = new OpenAI({
 	apiKey: process.env.OPENAI_API_KEY,
 });
 
-router.get("/", (req, res) => {
-	res.send("Hello World!");
-});
-
-router.post("/embed", async (req, res) => {
-	const { question } = req.body;
-	try {
-		const embeddingResponse = await openai.embeddings.create({
-			input: question,
-			model: "text-embedding-ada-002",
-		});
-		res.json({ embedding: embeddingResponse.data[0].embedding });
-	} catch (error) {
-		res.status(500).json({ error: error.message });
-	}
-});
-
-const indexName = "recording-index";
-const pc = new Pinecone({
-	apiKey: process.env.PINECONE_API_KEY,
-});
-
 router.post("/query", async (req, res) => {
-	const { vector } = req.body;
+	const {  question, namespace } = req.body;
+
+  const embeddingResponse = await openai.embeddings.create({
+    input: question,
+    model: "text-embedding-ada-002",
+  });
+
+  const vector = embeddingResponse.data[0].embedding;
+
 	try {
 		const index = pc.index(indexName);
-		const queryResponse = await index.namespace("ns1").query({
+		const queryResponse = await index.namespace(namespace).query({
 			vector,
 			topK: 5,
 			includeValues: false,
