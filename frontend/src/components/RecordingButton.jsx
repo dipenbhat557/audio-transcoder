@@ -16,9 +16,21 @@ const RecordingButton = ({ isRecording, setIsRecording, isConnected, isProcessin
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
-        audio: { channelCount: 1, sampleRate: 16000 }
+        audio: {
+          channelCount: 1,
+          sampleRate: 16000,
+          echoCancellation: true,
+          noiseSuppression: true
+        }
       });
-      mediaRecorder.current = new MediaRecorder(stream, { mimeType: 'audio/webm', audioBitsPerSecond: 128000 });
+      
+      // Specify the correct MIME type and codec
+      const options = {
+        mimeType: 'audio/webm;codecs=opus',
+        audioBitsPerSecond: 128000
+      };
+      
+      mediaRecorder.current = new MediaRecorder(stream, options);
       audioChunks.current = [];
       setRecordingTime(0);
       setTranscriptHistory([]);
@@ -34,7 +46,12 @@ const RecordingButton = ({ isRecording, setIsRecording, isConnected, isProcessin
           audioChunks.current.push(event.data);
           event.data.arrayBuffer().then(buffer => {
             if (wsRef.current?.readyState === WebSocket.OPEN) {
-              wsRef.current.send(JSON.stringify({ type: 'audio', data: Array.from(new Uint8Array(buffer)) }));
+              wsRef.current.send(JSON.stringify({ 
+                type: 'audio', 
+                data: Array.from(new Uint8Array(buffer)),
+                format: 'webm',
+                codec: 'opus'
+              }));
             }
           });
         }

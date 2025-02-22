@@ -6,6 +6,7 @@ const { Pinecone } = require("@pinecone-database/pinecone");
 const crypto = require("crypto");
 const ffmpeg = require('fluent-ffmpeg');
 const { PrismaClient } = require("@prisma/client");
+const Groq = require("groq-sdk");
 
 const prisma = new PrismaClient();
 const openai = new OpenAI({
@@ -15,6 +16,10 @@ const openai = new OpenAI({
 // Initialize Pinecone client
 const pc = new Pinecone({
 	apiKey: process.env.PINECONE_API_KEY,
+});
+
+const groq = new Groq({
+	apiKey: process.env.GROQ_API_KEY,
 });
 
 const indexName = "recording-index"; // Define your index name
@@ -63,7 +68,8 @@ class WebSocketController {
 		const sessionId = crypto.randomBytes(16).toString("hex");
 		const prefix = isComplete ? "complete" : "temp";
 		const timestamp = Date.now();
-		return path.join(process.cwd(), "temp", `${prefix}-${sessionId}-${timestamp}.webm`);
+		const random = Math.random().toString(36).substring(7);
+		return path.join(process.cwd(), "temp", `${prefix}-${sessionId}-${timestamp}-${random}.webm`);
 	}
 
 	// Ensure temp directory exists
@@ -81,6 +87,7 @@ class WebSocketController {
 			audioChunks: [],
 			lastProcessedTime: 0,
 			tempFiles: new Set(),
+			isProcessing: false  // Add a processing flag
 		};
 
 		this.sessionFiles.set(ws, sessionData);
@@ -112,15 +119,14 @@ class WebSocketController {
 
 		ws.on("close", async () => {
 			console.log("Client disconnected");
-			// Clean up all temp files for this session
 			const sessionData = this.sessionFiles.get(ws);
 			if (sessionData) {
+				// Clean up all temp files for this session
 				for (const filePath of sessionData.tempFiles) {
 					try {
 						if (await fs.access(filePath).then(() => true).catch(() => false)) {
-							await fs.unlink(filePath).catch(console.error);
-						} else {
-							console.log(`Temp file ${filePath} does not exist, skipping deletion.`);
+							await fs.unlink(filePath);
+							console.log(`Cleaned up file: ${filePath}`);
 						}
 					} catch (error) {
 						console.error(`Failed to delete temp file ${filePath}:`, error);
@@ -140,63 +146,120 @@ class WebSocketController {
 		const audioBuffer = Buffer.from(message.data);
 		sessionData.audioChunks.push(audioBuffer);
 		
-		// Commenting out real-time transcription
-		// if (sessionData.audioChunks.length >= 5) {
-		//     const tempFilePath = await this.getTempFilePath(ws);
-		//     sessionData.tempFiles.add(tempFilePath);
-		//     
-		//     let readStream;
-		//     try {
-		//         const chunksToProcess = Buffer.concat(sessionData.audioChunks);
-		//         console.log(`Writing ${chunksToProcess.length} bytes to ${tempFilePath}`);
-		//         await fs.writeFile(tempFilePath, chunksToProcess);
-		//         
-		//         readStream = fsSync.createReadStream(tempFilePath);
-		//         const audioFile = await OpenAI.toFile(readStream, "audio.webm");
-		//         
-		//         console.log(`Sending audio file to OpenAI: ${tempFilePath}`);
-		//         const transcript = await openai.audio.transcriptions.create({
-		//             file: audioFile,
-		//             model: "whisper-1",
-		//             response_format: "verbose_json",
-		//             language: "en",
-		//         });
-		//         
-		//         if (transcript?.segments) {
-		//             const segments = transcript.segments.map((segment) => ({
-		//                 speaker: "Speaker A",
-		//                 text: segment.text,
-		//                 start: segment.start,
-		//                 end: segment.end,
-		//             }));
-		//             
-		//             ws.send(JSON.stringify({ type: "transcription", segments }));
-		//             await this.indexSegmentsInPinecone(segments);
-		//         }
-		//         
-		//         sessionData.audioChunks = [];
-		//         
-		//     } catch (error) {
-		//         console.error("Transcription error:", error);
-		//         ws.send(JSON.stringify({ 
-		//             type: "error", 
-		//             message: "Failed to process audio segment" 
-		//         }));
-		//     } finally {
-		//         if (readStream) {
-		//             readStream.destroy();
-		//         }
-		//         
-		//         try {
-		//             if (await fs.access(tempFilePath).then(() => true).catch(() => false)) {
-		//                 await fs.unlink(tempFilePath);
-		//                 sessionData.tempFiles.delete(tempFilePath);
-		//             }
-		//         } catch (error) {
-		//             console.error("Error deleting temp file:", error);
-		//         }
-		//     }
-		// }
+		// Process audio chunks in batches for real-time transcription
+		if (sessionData.audioChunks.length >= 5) {
+			const tempFilePath = await this.getTempFilePath(ws);
+			let readStream = null;
+
+			try {
+				// Create a copy of chunks and clear the buffer immediately
+				const chunksToProcess = Buffer.concat([...sessionData.audioChunks]);
+				sessionData.audioChunks = []; // Clear immediately to prevent race conditions
+				
+				console.log(`Writing ${chunksToProcess.length} bytes to ${tempFilePath}`);
+				
+				// Write the audio data with .webm extension
+				const webmPath = `${tempFilePath}.webm`;
+				await fs.writeFile(webmPath, chunksToProcess);
+				
+				// Verify the file exists and has content
+				const stats = await fs.stat(webmPath);
+				if (stats.size === 0) {
+					throw new Error('Empty audio file created');
+				}
+
+				// Convert the audio to WAV format using ffmpeg with more detailed options
+				const wavPath = `${tempFilePath}.wav`;
+				await new Promise((resolve, reject) => {
+					ffmpeg()
+						.input(webmPath)
+						.inputOptions([
+							'-f webm',
+							'-acodec opus'
+						])
+						.outputOptions([
+							'-acodec pcm_s16le',
+							'-ac 1',
+							'-ar 16000'
+						])
+						.on('start', (commandLine) => {
+							console.log('FFmpeg processing started:', commandLine);
+						})
+						.on('error', (err, stdout, stderr) => {
+							console.error('FFmpeg processing error:', err);
+							console.error('FFmpeg stderr:', stderr);
+							reject(err);
+						})
+						.on('end', () => {
+							console.log('FFmpeg processing completed');
+							resolve();
+						})
+						.save(wavPath);
+				});
+
+				// Verify the WAV file was created successfully
+				const wavStats = await fs.stat(wavPath);
+				if (wavStats.size === 0) {
+					throw new Error('Empty WAV file created');
+				}
+
+				// Create read stream from the processed WAV file
+				readStream = fsSync.createReadStream(wavPath);
+				
+				// Use Groq API for transcription
+				const transcript = await groq.audio.transcriptions.create({
+					file: readStream,
+					model: "whisper-large-v3-turbo",
+					response_format: "verbose_json",
+					language: "en",
+					temperature: 0.0
+				});
+				
+				if (transcript?.segments) {
+					const segments = transcript.segments.map((segment) => ({
+						speaker: "Speaker A",
+						text: segment.text,
+						start: segment.start,
+						end: segment.end,
+					}));
+					
+					ws.send(JSON.stringify({ type: "transcription", segments }));
+					await this.indexSegmentsInPinecone(segments);
+				}
+				
+			} catch (error) {
+				console.error("Transcription error:", error);
+				ws.send(JSON.stringify({ 
+					type: "error", 
+					message: "Failed to process audio segment" 
+				}));
+			} finally {
+				// Clean up resources
+				if (readStream) {
+					readStream.destroy();
+				}
+
+				// Clean up temporary files
+				const filesToDelete = [
+					`${tempFilePath}.webm`,
+					`${tempFilePath}.wav`
+				];
+
+				for (const file of filesToDelete) {
+					try {
+						if (await fs.access(file).then(() => true).catch(() => false)) {
+							await fs.unlink(file);
+							console.log(`Deleted temporary file: ${file}`);
+						}
+					} catch (error) {
+						console.error(`Error deleting temp file ${file}:`, error);
+					}
+				}
+
+				// Remove from tracking set
+				sessionData.tempFiles.delete(tempFilePath);
+			}
+		}
 		
 		console.log("--- Handle Audio Message End ---\n");
 	}
@@ -374,17 +437,22 @@ Return a valid JSON object like this example (use exact format):
 			const completeAudioBuffer = Buffer.concat(sessionData.audioChunks);
 
 			await fs.writeFile(tempFilePath, completeAudioBuffer);
+			const readStream = fsSync.createReadStream(tempFilePath);
 
-			const audioFile = await OpenAI.toFile(
-				fsSync.createReadStream(tempFilePath),
-				"audio.webm"
-			);
+			// Use Groq API for final transcription
+			const transcript = await groq.audio.transcriptions.create({
+				file: readStream,
+				model: "whisper-large-v3",  // Using the full model for final transcription
+				response_format: "verbose_json",
+				language: "en",
+				temperature: 0.0
+			});
 
-			// Get final transcription with speaker diarization
-			const segments = await this.processAudioWithDiarization(audioFile);
+			// Process the transcript for speaker diarization
+			const segments = await this.processAudioWithDiarization(transcript);
 			const summary = await this.generateSummary(segments);
 
-			// Store only the summary in Pinecone
+			// Store the summary in Pinecone
 			await this.storeSummaryInPinecone(summary);
 
 			const conversation = await prisma.conversation.create({
@@ -394,25 +462,23 @@ Return a valid JSON object like this example (use exact format):
 				},
 			});
 
-			// Send final transcript first
-			ws.send(
-				JSON.stringify({
-					type: "final_transcript",
-					segments,
-				})
-			);
+			// Send final transcript
+			ws.send(JSON.stringify({
+				type: "final_transcript",
+				segments,
+			}));
 
-			// Then send summary
-			ws.send(
-				JSON.stringify({
-					type: "summary",
-					summary: conversation.summary,
-				})
-			);
+			// Send summary
+			ws.send(JSON.stringify({
+				type: "summary",
+				summary: conversation.summary,
+			}));
 
-			// Clear history only after sending final transcript
+			// Clear history
 			this.transcriptionHistory.delete(ws);
 
+			// Cleanup
+			readStream.destroy();
 			await fs.unlink(tempFilePath).catch(console.error);
 		} catch (error) {
 			console.error("Final processing error:", error);

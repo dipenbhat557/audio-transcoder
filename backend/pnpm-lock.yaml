@@ -35,6 +35,9 @@ importers:
       form-data:
         specifier: ^4.0.2
         version: 4.0.2
+      groq-sdk:
+        specifier: ^0.15.0
+        version: 0.15.0
       multer:
         specifier: 1.4.5-lts.1
         version: 1.4.5-lts.1
@@ -590,6 +593,9 @@ packages:
   gopd@1.2.0:
     resolution: {integrity: sha512-ZUKRh6/kUFoAiTAtTYPZJ3hw9wNxx+BIBOijnlG9PnrJsCcSjs1wyyD6vJpaYtgnzDrKYRSqf3OO6Rfa93xsRg==}
     engines: {node: '>= 0.4'}
+
+  groq-sdk@0.15.0:
+    resolution: {integrity: sha512-aYDEdr4qczx3cLCRRe+Beb37I7g/9bD5kHF+EEDxcrREWw1vKoRcfP3vHEkJB7Ud/8oOuF0scRwDpwWostTWuQ==}
 
   has-symbols@1.1.0:
     resolution: {integrity: sha512-1cDNdwJ2Jaohmb3sg4OmKaMBwuC48sYni5HUw2DvsC8LjGTLK9h+eb1X6RyuOHe4hT0ULCW68iomhjUoKUqlPQ==}
@@ -1557,6 +1563,18 @@ snapshots:
       path-is-absolute: 1.0.1
 
   gopd@1.2.0: {}
+
+  groq-sdk@0.15.0:
+    dependencies:
+      '@types/node': 18.19.76
+      '@types/node-fetch': 2.6.12
+      abort-controller: 3.0.0
+      agentkeepalive: 4.6.0
+      form-data-encoder: 1.7.2
+      formdata-node: 4.4.1
+      node-fetch: 2.7.0
+    transitivePeerDependencies:
+      - encoding
 
   has-symbols@1.1.0: {}
 
