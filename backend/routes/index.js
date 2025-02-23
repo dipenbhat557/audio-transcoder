@@ -23,7 +23,6 @@ router.post("/query", async (req, res) => {
             filter: { $or: [{ type: "segment" }, { type: "summary" }] }
         });
 
-        console.log("queryResponse", queryResponse.matches[0].metadata);
         const summaries = queryResponse.matches
             .filter(match => match.metadata.type === 'summary')
             .map(match => match.metadata.summary);
@@ -71,11 +70,9 @@ Please provide your answer:`;
                 },
                 { role: "user", content: prompt }
             ],
-            temperature: 0.9, // Lower temperature for more focused responses
-            max_tokens: 500  // Increased token limit for more detailed responses
+            temperature: 0.9,
+            max_tokens: 500 
         });
-
-        console.log("completion", completion.choices[0].message);
 
         const answer = completion.choices[0].message.content;
         res.json({ 

@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import { FaMicrophone, FaStop } from 'react-icons/fa';
 import Loader from './Loader';
 import { createClient, LiveTranscriptionEvents } from "@deepgram/sdk";
@@ -19,6 +19,7 @@ const RecordingButton = ({
   const mediaRecorder = useRef(null);
   const timerRef = useRef(null);
   const deepgramLive = useRef(null);
+  const [lastTranscript, setLastTranscript] = useState([]);
 
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60);
@@ -47,7 +48,6 @@ const RecordingButton = ({
 
       const deepgram = createClient(import.meta.env.VITE_DEEPGRAM_API_KEY);
       
-      console.log("Deepgram API key:", import.meta.env.VITE_DEEPGRAM_API_KEY);
       deepgramLive.current = deepgram.listen.live({
         model: "nova-3",
         language: "en",
@@ -55,7 +55,6 @@ const RecordingButton = ({
         interim_results: true,
         diarize: true
       });
-      console.log("Deepgram live:", deepgramLive.current);
 
       let isDeepgramReady = false;
       deepgramLive.current.on(LiveTranscriptionEvents.Open, () => {
@@ -74,73 +73,29 @@ const RecordingButton = ({
           const transcript = data.channel.alternatives[0];
           console.log("Transcript details:", transcript);
           
-          // Skip processing if no words
           if (!transcript.words || transcript.words.length === 0) {
             console.warn("Received empty transcript.");
             return;
           }
 
-          // Group words by speaker and combine them
-          const speakerGroups = transcript.words.reduce((groups, word) => {
-            const speaker = `Speaker ${word.speaker + 1}`;
-            if (!groups[speaker]) {
-              groups[speaker] = {
-                words: [],
-                start: word.start,
-                end: word.end
-              };
+          setTranscriptHistory(prev => {
+            if(transcript.transcript !== lastTranscript) {
+              if(transcript.words.some(word => lastTranscript.some(lastWord => lastWord.word === word.word))) {
+                setLastTranscript(transcript.words);
+                const newPrev = prev.filter((_,i) => i !== prev.length - 1);
+                return [...newPrev, {text: transcript.transcript, speaker: transcript.words[0].speaker, start: transcript.words[0].start, end: transcript.words[transcript.words.length - 1].end, words: transcript.words}];
+              }else{
+                setLastTranscript(transcript.words);
+                return [...prev, {text: transcript.transcript, speaker: transcript.words[0].speaker, start: transcript.words[0].start, end: transcript.words[transcript.words.length - 1].end, words: transcript.words}];
+              }
             }
-            groups[speaker].words.push(word.word);
-            groups[speaker].end = word.end;
-            return groups;
-          }, {});
-
-          // Convert groups to segments
-          const segments = Object.entries(speakerGroups).map(([speaker, group]) => ({
-            speaker,
-            text: group.words.join(' '),
-            start: group.start,
-            end: group.end
-          }));
-
-          // Process new segments
-          if (segments.length > 0) {
-            setTranscriptHistory(prev => {
-              const newHistory = [...prev];
-
-              segments.forEach(segment => {
-                // Check for duplicates across all segments
-                const isDuplicate = newHistory.some(existing => 
-                  existing.speaker === segment.speaker && 
-                  existing.text === segment.text
-                );
-
-                if (!isDuplicate) {
-                  // Check if the current segment is a continuation of the last segment
-                  const lastSegment = newHistory[newHistory.length - 1];
-                  if (lastSegment && lastSegment.speaker === segment.speaker) {
-                    // If the last segment ends with the current segment's text, append it
-                    if (lastSegment.text.endsWith(segment.text)) {
-                      lastSegment.text += ` ${segment.text}`;
-                    } else {
-                      // Add as a new segment
-                      newHistory.push(segment);
-                    }
-                  } else {
-                    // Add as a new segment
-                    newHistory.push(segment);
-                  }
-                }
-              });
-
-              return newHistory;
-            });
-          }
-
+            return prev;
+          });
+        
           if (wsRef.current?.readyState === WebSocket.OPEN) {
             wsRef.current.send(JSON.stringify({
               type: "transcript_update",
-              segments: segments
+              segments: [{text: transcript.transcript, speaker: transcript.words[0].speaker, start: transcript.words[0].start, end: transcript.words[transcript.words.length - 1].end, words: transcript.words}]
             }));
           }
         } else {
@@ -167,14 +122,10 @@ const RecordingButton = ({
         if (event.data.size > 0) {
           const reader = new FileReader();
           reader.onloadend = () => {
-            console.log("Sending audio data to Deepgram...");
-            console.log("Audio data size:", reader.result.byteLength);
             if (isDeepgramReady && deepgramLive.current?.getReadyState() === 1) {
               try {
-                console.log("reader data is ", reader.result);
                 deepgramLive.current.send(reader.result);
                 deepgramLive.current.keepAlive();
-                console.log("Audio data sent successfully to Deepgram");
               } catch (error) {
                 console.error("Error sending audio to Deepgram:", error);
               }
@@ -185,7 +136,6 @@ const RecordingButton = ({
               console.warn("Deepgram connection is not ready to send data. Ready state:", deepgramLive.current?.getReadyState());
             }
           };
-          console.log("Reading audio data...", event.data);
           reader.readAsArrayBuffer(event.data);
         }
       };
