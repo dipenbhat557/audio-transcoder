@@ -11,6 +11,7 @@ const RecordingButton = ({
   setIsProcessing,
   recordingTime,
   setRecordingTime,
+  transcriptHistory,
   setTranscriptHistory,
   setSummary,
   wsRef
@@ -27,6 +28,7 @@ const RecordingButton = ({
 
   const startRecording = async () => {
     try {
+      console.log("Starting recording...");
       setTranscriptHistory([]);
       setSummary('');
       const stream = await navigator.mediaDevices.getUserMedia({ 
@@ -45,22 +47,39 @@ const RecordingButton = ({
 
       const deepgram = createClient(import.meta.env.VITE_DEEPGRAM_API_KEY);
       
+      console.log("Deepgram API key:", import.meta.env.VITE_DEEPGRAM_API_KEY);
       deepgramLive.current = deepgram.listen.live({
-        model: "nova-3",
+        model: "nova-2",
         language: "en",
         smart_format: true,
         interim_results: true,
-        diarize: true
+        diarize: true,
+        encoding: "linear16",
+        sample_rate: 16000
       });
+      console.log("Deepgram live:", deepgramLive.current);
 
+      let isDeepgramReady = false;
       deepgramLive.current.on(LiveTranscriptionEvents.Open, () => {
         console.log("Connected to Deepgram");
+        isDeepgramReady = true;
+      });
+
+      deepgramLive.current.on(LiveTranscriptionEvents.Close, () => {
+        console.log("Disconnected from Deepgram");
+        isDeepgramReady = false;
       });
 
       deepgramLive.current.on(LiveTranscriptionEvents.Transcript, (data) => {
+        console.log("Transcript received:", data);
         if (data.channel?.alternatives?.[0]) {
           const transcript = data.channel.alternatives[0];
-          const segments = transcript.words.map(word => ({
+          if (transcript.words.length == 0) {
+            console.warn("Received empty transcript.");
+            return;
+          }
+          console.log("Transcript details:", transcript);
+          const segments = transcript?.words?.map(word => ({
             speaker: `Speaker ${word.speaker + 1}`,
             text: word.word,
             start: word.start,
@@ -77,10 +96,13 @@ const RecordingButton = ({
             return acc;
           }, []);
 
-          setTranscriptHistory(prev => {
-            const existingTexts = new Set(prev.map(seg => seg.text));
-            return [...prev, ...combinedSegments.filter(seg => !existingTexts.has(seg.text))];
-          });
+          const existingTexts = new Set(transcriptHistory?.map(seg => seg.text));
+          if (transcript.transcript && transcript.confidence > 0) {
+            const uniqueSegments = combinedSegments?.filter(seg => !existingTexts.has(seg.text));
+            setTranscriptHistory(prev => [...prev, ...uniqueSegments]);
+          } else {
+            console.warn("Received empty transcript or low confidence.");
+          }
 
           if (wsRef.current?.readyState === WebSocket.OPEN) {
             wsRef.current.send(JSON.stringify({
@@ -88,6 +110,8 @@ const RecordingButton = ({
               segments: combinedSegments
             }));
           }
+        } else {
+          console.warn("No alternatives found in transcript data.");
         }
       });
 
@@ -110,14 +134,24 @@ const RecordingButton = ({
         if (event.data.size > 0) {
           const reader = new FileReader();
           reader.onloadend = () => {
-            if (deepgramLive.current?.getReadyState() === 1) {
-              deepgramLive.current.send(reader.result);
-              deepgramLive.current.keepAlive();
+            console.log("Sending audio data to Deepgram...");
+            console.log("Audio data size:", reader.result.byteLength);
+            if (isDeepgramReady && deepgramLive.current?.getReadyState() === 1) {
+              try {
+                deepgramLive.current.send(reader.result);
+                deepgramLive.current.keepAlive();
+                console.log("Audio data sent successfully to Deepgram");
+              } catch (error) {
+                console.error("Error sending audio to Deepgram:", error);
+              }
               if (wsRef.current?.readyState === WebSocket.OPEN) {
                 wsRef.current.send(reader.result);
               }
+            } else {
+              console.warn("Deepgram connection is not ready to send data. Ready state:", deepgramLive.current?.getReadyState());
             }
           };
+          console.log("Reading audio data...", event.data);
           reader.readAsArrayBuffer(event.data);
         }
       };
@@ -147,6 +181,7 @@ const RecordingButton = ({
   };
 
   const stopRecording = () => {
+    console.log("Stopping recording...");
     if (mediaRecorder.current && isRecording) {
       mediaRecorder.current.stop();
     }

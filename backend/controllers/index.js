@@ -99,6 +99,8 @@ class WebSocketController {
 				model: "text-embedding-ada-002",
 			});
 
+			console.log("segments", segments);
+
 			const segmentEmbeddings = await Promise.all(
 				segments.map(async (segment) => {
 					const embedding = await openai.embeddings.create({
