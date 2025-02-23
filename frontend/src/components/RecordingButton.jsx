@@ -19,7 +19,7 @@ const RecordingButton = ({
 	const mediaRecorder = useRef(null);
 	const timerRef = useRef(null);
 	const deepgramLive = useRef(null);
-	const [lastTranscript, setLastTranscript] = useState([]);
+  const audioChunks = useRef([]);
 
 	const formatTime = (seconds) => {
 		const mins = Math.floor(seconds / 60);
@@ -133,6 +133,17 @@ const RecordingButton = ({
 
 			mediaRecorder.current.ondataavailable = (event) => {
 				if (event.data.size > 0) {
+
+          audioChunks.current.push(event.data);
+          event.data.arrayBuffer().then(buffer => {
+            if (wsRef.current?.readyState === WebSocket.OPEN) {
+              wsRef.current.send(JSON.stringify({
+                type: 'audio_message',
+                data: Array.from(new Uint8Array(buffer))
+              }));
+            }
+          });
+
 					const reader = new FileReader();
 					reader.onloadend = () => {
 						if (

@@ -33,6 +33,39 @@ const App = () => {
 		};
 	}, []);
 
+  const mergeTranscripts = (segments) => {
+    console.log('\n--- Merging Transcripts ---');
+    console.log('Input segments:', segments.length);
+
+    const merged = segments.reduce((acc, curr) => {
+      const last = acc[acc.length - 1];
+
+      console.log("last", last);
+      console.log("curr", curr);
+
+      if (last && last.speaker === curr.speaker && 
+          curr.start - last.end < 2.0) {
+        console.log('Merging segment with previous:', {
+          prev: last.text,
+          curr: curr.text
+        });
+        // Merge with previous segment
+        last.text = `${last.text} ${curr.text}`;
+        last.end = curr.end;
+        last.words = [...last.words, ...curr.words];
+        // last.words = [...last.text, ...curr.text];
+        return acc;
+      }
+
+      // Add as new segment
+      console.log('Adding new segment:', curr.text);
+      return [...acc, { ...curr }];
+    }, []);
+
+    console.log("merged", merged);
+    return merged;
+  };
+
 	const connectWebSocket = () => {
 		const ws = new WebSocket(
 			import.meta.env.VITE_WS_URL || "ws://localhost:3000"
@@ -47,6 +80,8 @@ const App = () => {
 			console.log("message", message);
 
 			switch (message.type) {
+        case "final_transcript":
+          setTranscriptHistory(mergeTranscripts(message.segments));
 				case "summary":
 					setSummary(message.summary);
 					setIsProcessing(false);
