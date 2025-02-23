@@ -4,7 +4,7 @@ const { Router } = require("express");
 const router = Router();
 
 router.post("/query", async (req, res) => {
-    const { question, namespace } = req.body;
+    const { question, namespace, questionHistory } = req.body;
 
     const embeddingResponse = await openai.embeddings.create({
         input: question,
@@ -23,6 +23,7 @@ router.post("/query", async (req, res) => {
             filter: { $or: [{ type: "segment" }, { type: "summary" }] }
         });
 
+        console.log("queryResponse", queryResponse.matches[0].metadata);
         const summaries = queryResponse.matches
             .filter(match => match.metadata.type === 'summary')
             .map(match => match.metadata.summary);
@@ -31,38 +32,59 @@ router.post("/query", async (req, res) => {
             .filter(match => match.metadata.type === 'segment')
             .map(match => ({
                 speaker: match.metadata.speaker,
-                text: match.metadata.text
+                text: match.metadata.text,
+                start: match.metadata.start || 0
             }))
             .sort((a, b) => a.start - b.start);
 
-        const prompt = `You are a helpful AI assistant answering questions about a specific conversation. 
-Answer the question based on the following context. If the answer cannot be found in the context, say "I cannot answer this based on the conversation content."
+        const combinedSummary = summaries.join('\n\n');
+
+        const prompt = `You are an AI assistant analyzing a specific conversation. Your task is to answer questions about this conversation accurately and precisely, using the provided context and previous question history.
 
 Context from the conversation:
 ${segments.map(s => `${s.speaker}: ${s.text}`).join('\n')}
 
 Summary of the conversation:
-${summaries[0] || 'No summary available.'}
+${combinedSummary || 'No summary available.'}
 
-User's question: ${question}
+Previous question history:
+${questionHistory.map(q => `${q.question}: ${q.answer}`).join('\n')}
 
-Please provide a specific answer based only on the information provided in the conversation above.`;
+Question: ${question}
+
+Instructions:
+1. Answer ONLY based on the information provided in the conversation and summary above.
+2. Be specific and cite the relevant parts of the conversation in your answer, including speaker names.
+3. If speaker names are not provided, use the summary and conversation context to determine the speaker.
+4. If multiple speakers discussed the topic, include their perspectives.
+5. Maintain the context of who said what by referencing the speakers.
+6. If the question relates to previous interactions, consider those in your answer.
+
+Please provide your answer:`;
 
         const completion = await openai.chat.completions.create({
             model: "gpt-3.5-turbo",
             messages: [
                 {
                     role: "system",
-                    content: "You are an AI assistant that helps answer questions about specific conversations. Only answer based on the provided conversation context. If the information isn't in the context, say so."
+                    content: "You are a precise and accurate AI assistant that helps answer questions about specific conversations. You must use the provided conversation context and summary to answer questions. Never make assumptions or include information not present in the context."
                 },
                 { role: "user", content: prompt }
             ],
-            temperature: 0.7,
-            max_tokens: 300
+            temperature: 0.9, // Lower temperature for more focused responses
+            max_tokens: 500  // Increased token limit for more detailed responses
         });
 
+        console.log("completion", completion.choices[0].message);
+
         const answer = completion.choices[0].message.content;
-        res.json({ answer });
+        res.json({ 
+            answer,
+            context: {
+                segments: segments.length,
+                summaries: summaries.length
+            }
+        });
     } catch (error) {
         console.error("Error processing query:", error);
         res.status(500).json({ error: error.message });

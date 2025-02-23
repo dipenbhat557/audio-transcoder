@@ -99,6 +99,7 @@ class WebSocketController {
 				model: "text-embedding-ada-002",
 			});
 
+			console.log("summary", summary);
 			console.log("segments", segments);
 
 			const segmentEmbeddings = await Promise.all(

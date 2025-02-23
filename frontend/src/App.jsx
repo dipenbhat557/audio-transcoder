@@ -80,6 +80,7 @@ const App = () => {
           recordingTime={recordingTime} 
           setRecordingTime={setRecordingTime} 
           wsRef={wsRef}
+          transcriptHistory={transcriptHistory}
           setTranscriptHistory={setTranscriptHistory}
           setSummary={setSummary}
         />

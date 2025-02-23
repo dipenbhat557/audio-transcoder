@@ -15,7 +15,9 @@ const ChatAssistant = ({ question, setQuestion, questionHistory, setQuestionHist
     setIsGeneratingAnswer(true);
     try {
       const namespace = localStorage.getItem('conversationNamespace');
+      console.log("namespace", namespace);
       if(!namespace) {
+        console.log("No namespace found");
         setAnswer('No conversation found. Please start a new conversation.');
         setQuestionHistory(prev => [...prev, { 
           question, 
@@ -27,12 +29,14 @@ const ChatAssistant = ({ question, setQuestion, questionHistory, setQuestionHist
         return;
       }
 
+      console.log("questionHistory", questionHistory);
       const response = await fetch(`${import.meta.env.VITE_API_URL}/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question, namespace })
+        body: JSON.stringify({ question, namespace, questionHistory })
       });
       const data = await response.json();
+      console.log("data", data);
       setQuestionHistory(prev => [...prev, { 
         question, 
         answer: data.answer,
@@ -40,6 +44,7 @@ const ChatAssistant = ({ question, setQuestion, questionHistory, setQuestionHist
       }]);
       setQuestion('');
       setAnswer(data.answer);
+      console.log("data.answer", data.answer);
     } catch (error) {
       console.error('Error asking question:', error);
       setAnswer('Error getting answer.');

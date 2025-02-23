@@ -3,10 +3,10 @@ import { FaMicrophone, FaStop } from 'react-icons/fa';
 import Loader from './Loader';
 import { createClient, LiveTranscriptionEvents } from "@deepgram/sdk";
 import { v4 as uuidv4 } from 'uuid';
-const RecordingButton = ({ 
-  isRecording, 
-  setIsRecording, 
-  isConnected, 
+const RecordingButton = ({
+  isRecording,
+  setIsRecording,
+  isConnected,
   isProcessing, 
   setIsProcessing,
   recordingTime,
@@ -49,13 +49,11 @@ const RecordingButton = ({
       
       console.log("Deepgram API key:", import.meta.env.VITE_DEEPGRAM_API_KEY);
       deepgramLive.current = deepgram.listen.live({
-        model: "nova-2",
+        model: "nova-3",
         language: "en",
         smart_format: true,
         interim_results: true,
-        diarize: true,
-        encoding: "linear16",
-        sample_rate: 16000
+        diarize: true
       });
       console.log("Deepgram live:", deepgramLive.current);
 
@@ -74,40 +72,75 @@ const RecordingButton = ({
         console.log("Transcript received:", data);
         if (data.channel?.alternatives?.[0]) {
           const transcript = data.channel.alternatives[0];
-          if (transcript.words.length == 0) {
+          console.log("Transcript details:", transcript);
+          
+          // Skip processing if no words
+          if (!transcript.words || transcript.words.length === 0) {
             console.warn("Received empty transcript.");
             return;
           }
-          console.log("Transcript details:", transcript);
-          const segments = transcript?.words?.map(word => ({
-            speaker: `Speaker ${word.speaker + 1}`,
-            text: word.word,
-            start: word.start,
-            end: word.end,
-            words: transcript.words
+
+          // Group words by speaker and combine them
+          const speakerGroups = transcript.words.reduce((groups, word) => {
+            const speaker = `Speaker ${word.speaker + 1}`;
+            if (!groups[speaker]) {
+              groups[speaker] = {
+                words: [],
+                start: word.start,
+                end: word.end
+              };
+            }
+            groups[speaker].words.push(word.word);
+            groups[speaker].end = word.end;
+            return groups;
+          }, {});
+
+          // Convert groups to segments
+          const segments = Object.entries(speakerGroups).map(([speaker, group]) => ({
+            speaker,
+            text: group.words.join(' '),
+            start: group.start,
+            end: group.end
           }));
 
-          const combinedSegments = segments.reduce((acc, curr) => {
-            if (acc.length === 0 || acc[acc.length - 1].speaker !== curr.speaker) {
-              acc.push({ ...curr, text: curr.text });
-            } else {
-              acc[acc.length - 1].text += ` ${curr.text}`;
-            }
-            return acc;
-          }, []);
+          // Process new segments
+          if (segments.length > 0) {
+            setTranscriptHistory(prev => {
+              const newHistory = [...prev];
 
-          const existingTexts = new Set(transcriptHistory?.map(seg => seg.text));
-          if (transcript.transcript && transcript.confidence > 0) {
-            const uniqueSegments = combinedSegments?.filter(seg => !existingTexts.has(seg.text));
-            setTranscriptHistory(prev => [...prev, ...uniqueSegments]);
-          } else {
-            console.warn("Received empty transcript or low confidence.");
+              segments.forEach(segment => {
+                // Check for duplicates across all segments
+                const isDuplicate = newHistory.some(existing => 
+                  existing.speaker === segment.speaker && 
+                  existing.text === segment.text
+                );
+
+                if (!isDuplicate) {
+                  // Check if the current segment is a continuation of the last segment
+                  const lastSegment = newHistory[newHistory.length - 1];
+                  if (lastSegment && lastSegment.speaker === segment.speaker) {
+                    // If the last segment ends with the current segment's text, append it
+                    if (lastSegment.text.endsWith(segment.text)) {
+                      lastSegment.text += ` ${segment.text}`;
+                    } else {
+                      // Add as a new segment
+                      newHistory.push(segment);
+                    }
+                  } else {
+                    // Add as a new segment
+                    newHistory.push(segment);
+                  }
+                }
+              });
+
+              return newHistory;
+            });
           }
 
           if (wsRef.current?.readyState === WebSocket.OPEN) {
             wsRef.current.send(JSON.stringify({
               type: "transcript_update",
-              segments: combinedSegments
+              segments: segments
             }));
           }
         } else {
@@ -138,6 +171,7 @@ const RecordingButton = ({
             console.log("Audio data size:", reader.result.byteLength);
             if (isDeepgramReady && deepgramLive.current?.getReadyState() === 1) {
               try {
+                console.log("reader data is ", reader.result);
                 deepgramLive.current.send(reader.result);
                 deepgramLive.current.keepAlive();
                 console.log("Audio data sent successfully to Deepgram");
